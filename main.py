@@ -9,9 +9,8 @@ import os
 
 APIKEY = os.getenv("API_KEY")  # API Key desde variable de entorno
 
-BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
-BASE_URL_PERFIL = "https://api.kvk.nl/api/v1/basisprofielen"
-
+BASE_URL = "https://api.overheid.io/openkvk"
+BASE_URL_PERFIL = "https://api.overheid.io/openkvk"
 
 def buscar_empresas(ciudad=None, sbi_code=None, pagina=1, resultados_por_pagina=100):
     """Busca empresas en la API de KVK"""
