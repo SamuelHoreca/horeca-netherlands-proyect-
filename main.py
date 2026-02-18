@@ -1,86 +1,89 @@
 import requests
-import json
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import os
 
-# === CONFIGURACIÓN DE LA API DE KVK ===
+APIKEY = os.getenv("API_KEY")  # API key de overheid.io
 
-APIKEY = os.getenv("API_KEY")  # API Key desde variable de entorno
+BASE_URL = "https://api.overheid.io/v3/openkvk"
+HEADERS = {"ovio-api-key": APIKEY}
 
-BASE_URL = "https://api.overheid.io/openkvk"
-BASE_URL_PERFIL = "https://api.overheid.io/openkvk"
 
-def buscar_empresas(ciudad=None, sbi_code=None, pagina=1, resultados_por_pagina=100):
-    """Busca empresas en la API de KVK"""
+def buscar_empresas(ciudad, page=1, size=100):
+    """Busca empresas filtrando por ciudad exacta (bezoeklocatie.plaats)."""
     params = {
-        "pagina": pagina,
-        "resultatenPerPagina": resultados_por_pagina,
-        "ovio-api-key": APIKEY,
+        "filters[bezoeklocatie.plaats]": ciudad,  # ✅ filtro exacto por ciudad
+        "size": size,
+        "page": page,
+        # Solicitar campos extra en el listado para evitar llamadas extra de perfil
+        "fields[]": ["bezoeklocatie.straat", "bezoeklocatie.huisnummer",
+                     "bezoeklocatie.postcode", "sbi", "website"],
     }
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
 
-    if ciudad:
-        params["plaats"] = ciudad
-    if sbi_code:
-        params["sbiCode"] = sbi_code
-
-    response = requests.get(BASE_URL, params=params)
-
-    if response.status_code == 200:
-        return response.json()
+    if resp.status_code == 200:
+        return resp.json()
     else:
-        print(f"Error: {response.status_code} - {response.text}")
+        print(f"Error {resp.status_code}: {resp.text}")
         return None
 
 
-def obtener_perfil(kvk_numero):
-    """Obtiene el perfil completo de una empresa por su KVK"""
-    url = f"{BASE_URL_PERFIL}/{kvk_numero}"
-    response = requests.get(url, params={"ovio-api-key": APIKEY})
-    if response.status_code == 200:
-        return response.json()
+def obtener_perfil(slug):
+    """
+    Obtiene el perfil completo de una empresa por su slug.
+    slug proviene de _links.self.href, ej: '/v3/openkvk/hoofdvestiging-58488340-downsized'
+    """
+    url = f"https://api.overheid.io{slug}"
+    resp = requests.get(url, headers=HEADERS)
+    if resp.status_code == 200:
+        return resp.json()
     return None
 
 
-def extraer_datos_empresa(empresa):
-    """Extrae los datos clave de una empresa"""
-    kvk = empresa.get("kvkNummer", "")
-    nombre = empresa.get("naam", "")
+def extraer_datos_empresa(item):
+    """
+    item es un elemento de _embedded.bedrijf del listado v3.
+    naam es string. bezoeklocatie es dict. sbi es lista de strings.
+    """
+    kvk = item.get("kvknummer", "")
+    nombre = item.get("naam", "")  # ✅ es string, no lista en el listado
 
-    # Manejo seguro de diccionarios anidados (puede ser None)
-    adres = empresa.get("adres") or {}
-    direccion_interna = adres.get("binnenlandsAdres") or {}
+    bezoek = item.get("bezoeklocatie") or {}
+    ciudad = bezoek.get("plaats", "")
+    calle = bezoek.get("straat", "")
+    numero = bezoek.get("huisnummer", "")
+    direccion = f"{calle} {numero}".strip()
 
-    ciudad = direccion_interna.get("plaats", "")
-    calle = direccion_interna.get("straatnaam", "")
+    # sector: lista de códigos SBI
+    sbi_list = item.get("sbi") or []
+    sector = ", ".join(sbi_list)
 
-    # === OBTENER PERFIL DETALLADO ===
-    perfil = obtener_perfil(kvk)
-    website = ""
-    telefono = ""
+    # website del listado (si se pidió en fields[])
+    website = item.get("website", "")
+
+    # Para startdatum y activiteitomschrijving hace falta el perfil detallado.
+    # Usamos el slug del _links.self.href para obtenerlo.
     fecha_inicio = ""
     descripcion = ""
 
-    if perfil:
-        fecha_inicio = perfil.get("startdatum", "")
-
-        # === OBTENER ACTIVIDAD SBI (SECTOR) ===
-        sbi_actividades = perfil.get("sbiActiviteiten", [])
-        if sbi_actividades:
-            descripcion = sbi_actividades[0].get("sbiOmschrijving", "")
-
-        # === WEB Y TELÉFONO SI ESTÁN DISPONIBLES ===
-        websites_list = perfil.get("websites") or []
-        if websites_list:
-            website = websites_list[0]
+    slug = (item.get("_links") or {}).get("self", {}).get("href", "")
+    if slug:
+        perfil = obtener_perfil(slug)
+        if perfil:
+            fecha_inicio = perfil.get("updated_at", "")
+            # activiteitomschrijving es la descripción de actividad
+            descripcion = perfil.get("activiteitomschrijving", "")
+            # Si website no vino en el listado, lo cogemos del perfil
+            if not website:
+                website = perfil.get("website", "")
 
     return {
         "kvk_numero": kvk,
         "nombre": nombre,
         "ciudad": ciudad,
-        "direccion": calle,
-        "sector": descripcion,
+        "direccion": direccion,
+        "sector": sector,
         "website": website,
         "fecha_inicio": fecha_inicio,
         "fecha_captura": datetime.today().strftime("%Y-%m-%d"),
@@ -88,57 +91,49 @@ def extraer_datos_empresa(empresa):
 
 
 def capturar_empresas_holanda():
-    """Captura empresas de las principales ciudades de los Países Bajos"""
+    """Captura empresas de las principales ciudades de los Países Bajos."""
     ciudades = [
-        "Amsterdam",
-        "Rotterdam",
-        "Den Haag",
-        "Utrecht",
-        "Eindhoven",
-        "Groningen",
-        "Tilburg",
-        "Almere",
+        "Amsterdam", "Rotterdam", "Den Haag", "Utrecht",
+        "Eindhoven", "Groningen", "Tilburg", "Almere",
     ]
 
     todas_empresas = []
 
     for ciudad in ciudades:
         print(f"\n🔍 Buscando empresas en {ciudad}...")
-        pagina = 1
+        page = 1
+        size = 100
 
         while True:
-            datos = buscar_empresas(ciudad=ciudad, pagina=pagina)
-
-            if not datos or not datos.get("resultaten"):
+            datos = buscar_empresas(ciudad=ciudad, page=page, size=size)
+            if not datos:
                 break
 
-            for empresa in datos["resultaten"]:
-                time.sleep(0.1)  # Respetar límite de 100 reqs/min
+            # ✅ el array de resultados está en _embedded.bedrijf
+            items = datos.get("_embedded", {}).get("bedrijf", [])
+            if not items:
+                break
+
+            for empresa in items:
+                time.sleep(0.2)  # ~5 reqs/s para no superar límites
                 info = extraer_datos_empresa(empresa)
                 todas_empresas.append(info)
                 print(f"✅ {info['nombre']} - {info['ciudad']}")
 
-            total = datos.get("totaal", 0)
-            if pagina * 100 >= total or pagina >= 10:  # Máx 1000 por ciudad
+            # paginación: pageCount está en la raíz de la respuesta
+            page_count = datos.get("pageCount", 1)
+            if page >= page_count:
                 break
 
-            pagina += 1
+            page += 1
 
-    # === EXPORTAR A CSV ===
+    # exportar a CSV
     fecha = datetime.today().strftime("%Y%m%d")
     nombre_archivo = f"empresas_holanda_{fecha}.csv"
 
     with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
-        campos = [
-            "kvk_numero",
-            "nombre",
-            "ciudad",
-            "direccion",
-            "sector",
-            "website",
-            "fecha_inicio",
-            "fecha_captura",
-        ]
+        campos = ["kvk_numero", "nombre", "ciudad", "direccion",
+                  "sector", "website", "fecha_inicio", "fecha_captura"]
         writer = csv.DictWriter(f, fieldnames=campos)
         writer.writeheader()
         writer.writerows(todas_empresas)
@@ -148,14 +143,15 @@ def capturar_empresas_holanda():
 
 
 def filtrar_empresas_nuevas(empresas, dias=7):
-    """Filtra empresas registradas en los últimos N días"""
+    """Filtra empresas actualizadas en los últimos N días."""
     hoy = datetime.today()
     nuevas = []
 
     for e in empresas:
         if e["fecha_inicio"]:
             try:
-                fecha = datetime.strptime(str(e["fecha_inicio"]), "%Y%m%d")
+                # updated_at viene en formato YYYY-MM-DD
+                fecha = datetime.strptime(str(e["fecha_inicio"]), "%Y-%m-%d")
                 if (hoy - fecha).days <= dias:
                     nuevas.append(e)
             except Exception:
