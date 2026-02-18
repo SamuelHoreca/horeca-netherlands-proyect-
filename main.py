@@ -6,7 +6,7 @@ import time
 
 # === CONFIGURACIÓN DE LA API DE KVK ===
 
-APIKEY = "l7xx1f2691f2520d487b902f4e0b57a0b197"  # API Key de prueba
+APIKEY = "ee0d701d9fb3e2cdc863dca81f25aa80dd6d314909a1cb7f11ccd9c7af1a3b17"  # API Key de prueba
 
 BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
 
