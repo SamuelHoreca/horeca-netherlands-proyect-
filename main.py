@@ -17,7 +17,6 @@ def buscar_empresas(ciudad=None, sbi_code=None, pagina=1, resultados_por_pagina=
     params = {
         "pagina": pagina,
         "resultatenPerPagina": resultados_por_pagina,
-        "type": "hoofdvestiging",  # Solo sedes principales
         "ovio-api-key": APIKEY,
     }
 
