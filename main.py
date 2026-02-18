@@ -90,22 +90,14 @@ def extraer_datos_empresa(empresa):
 # === CAPTURA MASIVA DE EMPRESAS ===
 
 def capturar_empresas_holanda():
-    """Captura empresas de las principales ciudades de los Países Bajos"""
-    # === CIUDADES PRINCIPALES DE LOS PAÍSES BAJOS ===
-    ciudades = [
-        "Amsterdam", "Rotterdam", "Den Haag", "Utrecht", 
-        "Eindhoven", "Groningen", "Tilburg", "Almere"
-    ]
-    
+    """Captura empresas de todos los Países Bajos"""    # === CIUDADES PRINCIPALES DE LOS PAÍSES BAJOS ===
+
     todas_empresas = []
     
-    for ciudad in ciudades:
-        print(f"\n🔍 Buscando empresas en {ciudad}...")
-        pagina = 1
-        
+    print(f"\n🔍 Buscando empresas en Países Bajos...")
+    pagina = 1        
         while True:
-            datos = buscar_empresas(ciudad=ciudad, pagina=pagina)
-            
+            datos = buscar_empresas(ciudad=None, pagina=pagina)            
             if not datos or not datos.get("resultaten"):
                 break
             
@@ -116,8 +108,7 @@ def capturar_empresas_holanda():
                 print(f"✅ {info['nombre']} - {info['ciudad']}")
             
             total = datos.get("totaal", 0)
-            if pagina * 100 >= total or pagina >= 10:  # Máx 1000 por ciudad
-                break
+            if pagina * 100 >= total or pagina >= 50:  # Máx 5000 empresas totales                break
             
             pagina += 1
     
