@@ -6,8 +6,9 @@ import time
 import os
 
 # === CONFIGURACIÓN DE LA API DE KVK ===
-APIKEY = os.environ.get("API_KEY"
-                       )BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
+APIKEY = os.environ.get("API_KEY")
+
+BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
 
 BASE_URL_PERFIL = "https://api.kvk.nl/api/v1/basisprofielen"
 
