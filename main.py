@@ -14,7 +14,7 @@ BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
 BASE_URL_PERFIL = "https://api.kvk.nl/api/v1/basisprofielen"
 
 HEADERS = {
-    "apikey": APIKEY
+    "ovio-api-key": APIKEY
 }
 
 # === FUNCIONES PRINCIPALES ===
