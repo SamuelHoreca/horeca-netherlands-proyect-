@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 import time
 
 # === CONFIGURACIÓN DE LA API DE KVK ===
-APIKEY = "TU_API_KEY_AQUI"  # o usa la de test: l7xx1f2691f2520d487b902f4e0b57a0b197
+APIKEY = "l7xx1f2691f2520d487b902f4e0b57a0b197"
 BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
+
 BASE_URL_PERFIL = "https://api.kvk.nl/api/v1/basisprofielen"
 
 HEADERS = {
