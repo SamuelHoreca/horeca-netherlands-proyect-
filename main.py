@@ -116,4 +116,57 @@ def capturar_empresas_holanda():
                 break
 
             # La respuesta siempre tiene _embedded.bedrijf
-            items = datos.get("_embedded", {}).get("bedrijf", 
+            items = datos.get("_embedded", {}).get("bedrijf", [])
+            if not items:
+                print(f"  ⚠️ Sin resultados en página {page}")
+                break
+
+            print(f"  📄 Página {page}/{datos.get('pageCount', '?')} — {len(items)} empresas")
+
+            for empresa in items:
+                time.sleep(0.2)  # ~5 reqs/s para no saturar la API
+                info = extraer_datos_empresa(empresa)
+                todas_empresas.append(info)
+                print(f"  ✅ {info['nombre']} ({info['kvk_numero']}) - {info['ciudad']}")
+
+            page_count = datos.get("pageCount", 1)
+            if page >= page_count:
+                break
+
+            page += 1
+
+    # Exportar a CSV
+    fecha = datetime.today().strftime("%Y%m%d")
+    nombre_archivo = f"empresas_holanda_{fecha}.csv"
+
+    with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
+        campos = [
+            "kvk_numero", "nombre", "ciudad", "direccion",
+            "sector", "website", "fecha_inicio", "fecha_captura",
+        ]
+        writer = csv.DictWriter(f, fieldnames=campos)
+        writer.writeheader()
+        writer.writerows(todas_empresas)
+
+    print(f"\n✅ Exportadas {len(todas_empresas)} empresas → {nombre_archivo}")
+    return nombre_archivo
+
+
+def filtrar_empresas_nuevas(empresas, dias=7):
+    """Filtra empresas actualizadas en los últimos N días."""
+    hoy = datetime.today()
+    nuevas = []
+    for e in empresas:
+        if e["fecha_inicio"]:
+            try:
+                # updated_at viene en formato YYYY-MM-DD
+                fecha = datetime.strptime(str(e["fecha_inicio"]), "%Y-%m-%d")
+                if (hoy - fecha).days <= dias:
+                    nuevas.append(e)
+            except Exception:
+                pass
+    return nuevas
+
+
+if __name__ == "__main__":
+    capturar_empresas_holanda()
