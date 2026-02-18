@@ -98,10 +98,10 @@ def capturar_empresas_holanda():
     
     print(f"\n🔍 Buscando empresas en Países Bajos...")
     pagina = 1        
-        while True:
-            datos = buscar_empresas(ciudad=None, pagina=pagina)            
-            if not datos or not datos.get("resultaten"):
-                break
+    while True:
+        datos = buscar_empresas(ciudad=None, pagina=pagina)            
+        if not datos or not datos.get("resultaten"):
+            break
             
             for empresa in datos["resultaten"]:
                 time.sleep(0.1)  # Respetar límite de 100 reqs/min
