@@ -3,10 +3,11 @@ import json
 import csv
 from datetime import datetime, timedelta
 import time
+import os
 
 # === CONFIGURACIÓN DE LA API DE KVK ===
-APIKEY = "l7xx1f2691f2520d487b902f4e0b57a0b197"
-BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
+APIKEY = os.environ.get("API_KEY"
+                       )BASE_URL = "https://api.kvk.nl/api/v2/zoeken"
 
 BASE_URL_PERFIL = "https://api.kvk.nl/api/v1/basisprofielen"
 
