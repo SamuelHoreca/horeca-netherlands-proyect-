@@ -10,33 +10,10 @@ APIKEY = os.getenv("API_KEY")  # API key de overheid.io
 BASE_URL = "https://api.overheid.io/v3/openkvk"
 HEADERS = {"ovio-api-key": APIKEY}
 
-# Archivo persistente donde se guardan todos los KVK numbers ya vistos
-SEEN_FILE = "seen_kvk.txt"
-
 # GitHub config
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = "SamuelHoreca/horeca-netherlands-proyect-"
 GITHUB_BRANCH = "main"
-
-
-def cargar_kvk_vistos():
-    """
-    Carga el conjunto de KVK numbers ya procesados en ejecuciones anteriores.
-    Si el archivo no existe, devuelve un conjunto vacío.
-    """
-    if not os.path.exists(SEEN_FILE):
-        return set()
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f if line.strip())
-
-
-def guardar_kvk_vistos(kvk_set):
-    """
-    Sobreescribe el archivo de KVK vistos con el conjunto actualizado.
-    """
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        for kvk in sorted(kvk_set):
-            f.write(kvk + "\n")
 
 
 def subir_archivo_github(ruta_local, ruta_repo):
@@ -85,8 +62,6 @@ def subir_archivo_github(ruta_local, ruta_repo):
 def buscar_empresas(ciudad, page=1, size=100):
     """
     Busca empresas filtrando por ciudad.
-    Los corchetes en los parámetros deben enviarse como string literal
-    porque requests los codifica mal con dicts normales.
     """
     url = (
         f"{BASE_URL}"
@@ -133,9 +108,9 @@ def extraer_datos_empresa(item):
     sbi_list = item.get("sbi") or []
     sector = ", ".join(sbi_list)
     website = item.get("website", "")
-
     fecha_inicio = ""
     descripcion = ""
+
     slug = (item.get("_links") or {}).get("self", {}).get("href", "")
     if slug:
         perfil = obtener_perfil(slug)
@@ -161,7 +136,7 @@ def extraer_datos_empresa(item):
 
 
 def capturar_empresas_holanda():
-    """Captura empresas NUEVAS (no vistas antes) de las principales ciudades de Holanda."""
+    """Captura todas las empresas de las principales ciudades de Holanda."""
     ciudades = [
         "Amsterdam", "Rotterdam", "Den Haag", "Utrecht",
         "Eindhoven", "Groningen", "Tilburg", "Almere",
@@ -170,18 +145,12 @@ def capturar_empresas_holanda():
         "'s-Hertogenbosch", "Hoofddorp", "Maastricht", "Leiden",
     ]
 
-    kvk_vistos = cargar_kvk_vistos()
-    print(f"\n📋 KVK numbers ya vistos en ejecuciones anteriores: {len(kvk_vistos)}")
-
-    nuevas_empresas = []
-    nuevos_kvk = set()
+    empresas = []
 
     for ciudad in ciudades:
-        print(f"\n🔍 Buscando empresas nuevas en {ciudad}...")
+        print(f"\n🔍 Buscando empresas en {ciudad}...")
         page = 1
         size = 100
-        encontradas_ciudad = 0
-        saltadas_ciudad = 0
 
         while True:
             datos = buscar_empresas(ciudad=ciudad, page=page, size=size)
@@ -194,70 +163,42 @@ def capturar_empresas_holanda():
                 break
 
             page_count = datos.get("pageCount", 1)
-            print(f"  📄 Página {page}/{page_count} — {len(items)} empresas encontradas")
+            print(f"  📄 Página {page}/{page_count} — {len(items)} empresas")
 
             for empresa in items:
-                kvk = str(empresa.get("kvknummer", "")).strip()
-
-                if kvk in kvk_vistos or kvk in nuevos_kvk:
-                    saltadas_ciudad += 1
-                    continue
-
                 time.sleep(0.2)
                 info = extraer_datos_empresa(empresa)
-                nuevas_empresas.append(info)
-                nuevos_kvk.add(kvk)
-                encontradas_ciudad += 1
-                print(f"  ✅ {info['nombre']} ({kvk}) - {info['ciudad']}")
+                empresas.append(info)
+                print(f"  ✅ {info['nombre']} ({info.get('kvk_numero', '')}) - {info['ciudad']}")
 
             if page >= page_count:
                 break
             page += 1
 
-        print(f"  📊 {ciudad}: {encontradas_ciudad} nuevas, {saltadas_ciudad} ya vistas")
+        print(f"  📊 {ciudad}: {len([e for e in empresas if e['ciudad'] == ciudad])} empresas")
 
-    # Actualizar el archivo de KVK vistos
-    kvk_vistos.update(nuevos_kvk)
-    guardar_kvk_vistos(kvk_vistos)
-    print(f"\n💾 Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
+    print(f"\n💾 Total empresas capturadas: {len(empresas)}")
 
     # Exportar a CSV
     fecha = datetime.today().strftime("%Y%m%d")
     nombre_archivo = f"empresas_holanda_{fecha}.csv"
 
-    if nuevas_empresas:
-        with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
-            campos = [
-                "kvk_numero", "nombre", "ciudad", "direccion",
-                "sector", "website", "fecha_inicio", "fecha_captura",
-            ]
-            writer = csv.DictWriter(f, fieldnames=campos)
-            writer.writeheader()
-            writer.writerows(nuevas_empresas)
-        print(f"✅ Exportadas {len(nuevas_empresas)} empresas nuevas → {nombre_archivo}")
+    with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
+        campos = [
+            "kvk_numero", "nombre", "ciudad", "direccion",
+            "sector", "website", "fecha_inicio", "fecha_captura",
+        ]
+        writer = csv.DictWriter(f, fieldnames=campos)
+        writer.writeheader()
+        writer.writerows(empresas)
 
-        # Subir CSV a GitHub
-        ruta_repo = f"exports/{nombre_archivo}"
-        subir_archivo_github(nombre_archivo, ruta_repo)
-    else:
-        print("ℹ️ No hay empresas nuevas para exportar hoy.")
+    print(f"✅ Exportadas {len(empresas)} empresas → {nombre_archivo}")
+
+    # Subir CSV a GitHub
+    ruta_repo = f"exports/{nombre_archivo}"
+    subir_archivo_github(nombre_archivo, ruta_repo)
 
     return nombre_archivo
-
-
-def filtrar_empresas_nuevas(empresas, dias=7):
-    """Filtra empresas actualizadas en los últimos N días."""
-    hoy = datetime.today()
-    nuevas = []
-    for e in empresas:
-        if e["fecha_inicio"]:
-            try:
-                fecha = datetime.strptime(str(e["fecha_inicio"]), "%Y-%m-%d")
-                if (hoy - fecha).days <= dias:
-                    nuevas.append(e)
-            except Exception:
-                pass
-    return nuevas
 
 
 if __name__ == "__main__":
