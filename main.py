@@ -1,12 +1,36 @@
 import requests
 import csv
+import os
 from datetime import datetime
 import time
-import os
 
+# === CONFIGURACIÓN DE LA API DE OVERHEID.IO ===
 APIKEY = os.getenv("API_KEY")  # API key de overheid.io
 BASE_URL = "https://api.overheid.io/v3/openkvk"
 HEADERS = {"ovio-api-key": APIKEY}
+
+# Archivo persistente donde se guardan todos los KVK numbers ya vistos
+SEEN_FILE = "seen_kvk.txt"
+
+
+def cargar_kvk_vistos():
+    """
+    Carga el conjunto de KVK numbers ya procesados en ejecuciones anteriores.
+    Si el archivo no existe, devuelve un conjunto vacío.
+    """
+    if not os.path.exists(SEEN_FILE):
+        return set()
+    with open(SEEN_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def guardar_kvk_vistos(kvk_set):
+    """
+    Sobreescribe el archivo de KVK vistos con el conjunto actualizado.
+    """
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        for kvk in sorted(kvk_set):
+            f.write(kvk + "\n")
 
 
 def buscar_empresas(ciudad, page=1, size=100):
@@ -29,7 +53,6 @@ def buscar_empresas(ciudad, page=1, size=100):
         f"&page={page}"
     )
     resp = requests.get(url, headers=HEADERS)
-
     if resp.status_code == 200:
         return resp.json()
     else:
@@ -57,13 +80,11 @@ def extraer_datos_empresa(item):
     """
     kvk = item.get("kvknummer", "")
     nombre = item.get("naam", "")  # string en el listado
-
     bezoek = item.get("bezoeklocatie") or {}
     ciudad = bezoek.get("plaats", "")
     calle = bezoek.get("straat", "")
     numero = bezoek.get("huisnummer", "")
     direccion = f"{calle} {numero}".strip()
-
     sbi_list = item.get("sbi") or []
     sector = ", ".join(sbi_list)
     website = item.get("website", "")
@@ -97,58 +118,85 @@ def extraer_datos_empresa(item):
 
 
 def capturar_empresas_holanda():
-    """Captura empresas de las principales ciudades de los Países Bajos."""
+    """Captura empresas NUEVAS (no vistas antes) de las principales ciudades de Holanda."""
     ciudades = [
         "Amsterdam", "Rotterdam", "Den Haag", "Utrecht",
         "Eindhoven", "Groningen", "Tilburg", "Almere",
+        "Breda", "Nijmegen", "Enschede", "Haarlem",
+        "Arnhem", "Zaandam", "Amersfoort", "Apeldoorn",
+        "'s-Hertogenbosch", "Hoofddorp", "Maastricht", "Leiden",
     ]
 
-    todas_empresas = []
+    # Cargar el historial de KVK numbers ya procesados
+    kvk_vistos = cargar_kvk_vistos()
+    print(f"\n📋 KVK numbers ya vistos en ejecuciones anteriores: {len(kvk_vistos)}")
+
+    nuevas_empresas = []
+    nuevos_kvk = set()
 
     for ciudad in ciudades:
-        print(f"\n🔍 Buscando empresas en {ciudad}...")
+        print(f"\n🔍 Buscando empresas nuevas en {ciudad}...")
         page = 1
         size = 100
+        encontradas_ciudad = 0
+        saltadas_ciudad = 0
 
         while True:
             datos = buscar_empresas(ciudad=ciudad, page=page, size=size)
             if not datos:
                 break
 
-            # La respuesta siempre tiene _embedded.bedrijf
             items = datos.get("_embedded", {}).get("bedrijf", [])
             if not items:
                 print(f"  ⚠️ Sin resultados en página {page}")
                 break
 
-            print(f"  📄 Página {page}/{datos.get('pageCount', '?')} — {len(items)} empresas")
+            page_count = datos.get("pageCount", 1)
+            print(f"  📄 Página {page}/{page_count} — {len(items)} empresas encontradas")
 
             for empresa in items:
+                kvk = str(empresa.get("kvknummer", "")).strip()
+
+                # Saltar si ya fue procesada en ejecuciones anteriores O en esta misma ejecución
+                if kvk in kvk_vistos or kvk in nuevos_kvk:
+                    saltadas_ciudad += 1
+                    continue
+
                 time.sleep(0.2)  # ~5 reqs/s para no saturar la API
                 info = extraer_datos_empresa(empresa)
-                todas_empresas.append(info)
-                print(f"  ✅ {info['nombre']} ({info['kvk_numero']}) - {info['ciudad']}")
+                nuevas_empresas.append(info)
+                nuevos_kvk.add(kvk)
+                encontradas_ciudad += 1
+                print(f"  ✅ {info['nombre']} ({kvk}) - {info['ciudad']}")
 
-            page_count = datos.get("pageCount", 1)
             if page >= page_count:
                 break
-
             page += 1
 
-    # Exportar a CSV
+        print(f"  📊 {ciudad}: {encontradas_ciudad} nuevas, {saltadas_ciudad} ya vistas")
+
+    # Actualizar el archivo de KVK vistos con los nuevos
+    kvk_vistos.update(nuevos_kvk)
+    guardar_kvk_vistos(kvk_vistos)
+    print(f"\n💾 Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
+
+    # Exportar a CSV con fecha
     fecha = datetime.today().strftime("%Y%m%d")
     nombre_archivo = f"empresas_holanda_{fecha}.csv"
 
-    with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
-        campos = [
-            "kvk_numero", "nombre", "ciudad", "direccion",
-            "sector", "website", "fecha_inicio", "fecha_captura",
-        ]
-        writer = csv.DictWriter(f, fieldnames=campos)
-        writer.writeheader()
-        writer.writerows(todas_empresas)
+    if nuevas_empresas:
+        with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
+            campos = [
+                "kvk_numero", "nombre", "ciudad", "direccion",
+                "sector", "website", "fecha_inicio", "fecha_captura",
+            ]
+            writer = csv.DictWriter(f, fieldnames=campos)
+            writer.writeheader()
+            writer.writerows(nuevas_empresas)
+        print(f"✅ Exportadas {len(nuevas_empresas)} empresas nuevas → {nombre_archivo}")
+    else:
+        print("ℹ️ No hay empresas nuevas para exportar hoy.")
 
-    print(f"\n✅ Exportadas {len(todas_empresas)} empresas → {nombre_archivo}")
     return nombre_archivo
 
 
