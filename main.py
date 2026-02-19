@@ -1,6 +1,7 @@
 import requests
 import csv
 import os
+import base64
 from datetime import datetime
 import time
 
@@ -11,6 +12,11 @@ HEADERS = {"ovio-api-key": APIKEY}
 
 # Archivo persistente donde se guardan todos los KVK numbers ya vistos
 SEEN_FILE = "seen_kvk.txt"
+
+# GitHub config
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = "SamuelHoreca/horeca-netherlands-proyect-"
+GITHUB_BRANCH = "main"
 
 
 def cargar_kvk_vistos():
@@ -33,13 +39,55 @@ def guardar_kvk_vistos(kvk_set):
             f.write(kvk + "\n")
 
 
+def subir_archivo_github(ruta_local, ruta_repo):
+    """
+    Sube o actualiza un archivo en GitHub via API REST.
+    ruta_local: path del archivo en el contenedor
+    ruta_repo: path destino dentro del repositorio (ej: 'exports/empresas.csv')
+    """
+    if not GITHUB_TOKEN:
+        print("⚠️ GITHUB_TOKEN no configurado, no se sube a GitHub")
+        return
+
+    with open(ruta_local, "rb") as f:
+        contenido_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{ruta_repo}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    # Comprobar si el archivo ya existe para obtener su SHA (necesario para actualizar)
+    resp = requests.get(url, headers=headers, params={"ref": GITHUB_BRANCH})
+    sha = None
+    if resp.status_code == 200:
+        sha = resp.json().get("sha")
+
+    # Preparar payload
+    fecha = datetime.today().strftime("%Y-%m-%d")
+    payload = {
+        "message": f"CSV empresas Holanda {fecha}",
+        "content": contenido_b64,
+        "branch": GITHUB_BRANCH,
+    }
+    if sha:
+        payload["sha"] = sha  # necesario para sobreescribir
+
+    resp = requests.put(url, headers=headers, json=payload)
+    if resp.status_code in (200, 201):
+        download_url = resp.json()["content"]["download_url"]
+        print(f"✅ CSV subido a GitHub: {download_url}")
+    else:
+        print(f"❌ Error al subir a GitHub: {resp.status_code} - {resp.text}")
+
+
 def buscar_empresas(ciudad, page=1, size=100):
     """
     Busca empresas filtrando por ciudad.
     Los corchetes en los parámetros deben enviarse como string literal
     porque requests los codifica mal con dicts normales.
     """
-    # Construimos la URL manualmente para que los [] lleguen correctamente
     url = (
         f"{BASE_URL}"
         f"?filters[bezoeklocatie.plaats]={ciudad}"
@@ -63,7 +111,6 @@ def buscar_empresas(ciudad, page=1, size=100):
 def obtener_perfil(slug):
     """
     Obtiene el perfil completo de una empresa por su slug.
-    slug viene de _links.self.href, ej: '/v3/openkvk/hoofdvestiging-58488340-downsized'
     """
     url = f"https://api.overheid.io{slug}"
     resp = requests.get(url, headers=HEADERS)
@@ -75,11 +122,9 @@ def obtener_perfil(slug):
 def extraer_datos_empresa(item):
     """
     Extrae datos del item del listado y enriquece con perfil detallado.
-    La respuesta del listado solo tiene: naam (str), kvknummer, _links.
-    Los campos extra vienen si se pidieron con fields[].
     """
     kvk = item.get("kvknummer", "")
-    nombre = item.get("naam", "")  # string en el listado
+    nombre = item.get("naam", "")
     bezoek = item.get("bezoeklocatie") or {}
     ciudad = bezoek.get("plaats", "")
     calle = bezoek.get("straat", "")
@@ -89,7 +134,6 @@ def extraer_datos_empresa(item):
     sector = ", ".join(sbi_list)
     website = item.get("website", "")
 
-    # Perfil detallado para obtener activiteitomschrijving, updated_at, etc.
     fecha_inicio = ""
     descripcion = ""
     slug = (item.get("_links") or {}).get("self", {}).get("href", "")
@@ -100,7 +144,6 @@ def extraer_datos_empresa(item):
             descripcion = perfil.get("activiteitomschrijving", "")
             if not website:
                 website = perfil.get("website", "")
-            # si sector tampoco llegó en el listado, tomarlo del perfil
             if not sector:
                 sbi_list = perfil.get("sbi") or []
                 sector = ", ".join(sbi_list)
@@ -127,7 +170,6 @@ def capturar_empresas_holanda():
         "'s-Hertogenbosch", "Hoofddorp", "Maastricht", "Leiden",
     ]
 
-    # Cargar el historial de KVK numbers ya procesados
     kvk_vistos = cargar_kvk_vistos()
     print(f"\n📋 KVK numbers ya vistos en ejecuciones anteriores: {len(kvk_vistos)}")
 
@@ -157,12 +199,11 @@ def capturar_empresas_holanda():
             for empresa in items:
                 kvk = str(empresa.get("kvknummer", "")).strip()
 
-                # Saltar si ya fue procesada en ejecuciones anteriores O en esta misma ejecución
                 if kvk in kvk_vistos or kvk in nuevos_kvk:
                     saltadas_ciudad += 1
                     continue
 
-                time.sleep(0.2)  # ~5 reqs/s para no saturar la API
+                time.sleep(0.2)
                 info = extraer_datos_empresa(empresa)
                 nuevas_empresas.append(info)
                 nuevos_kvk.add(kvk)
@@ -175,12 +216,12 @@ def capturar_empresas_holanda():
 
         print(f"  📊 {ciudad}: {encontradas_ciudad} nuevas, {saltadas_ciudad} ya vistas")
 
-    # Actualizar el archivo de KVK vistos con los nuevos
+    # Actualizar el archivo de KVK vistos
     kvk_vistos.update(nuevos_kvk)
     guardar_kvk_vistos(kvk_vistos)
     print(f"\n💾 Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
 
-    # Exportar a CSV con fecha
+    # Exportar a CSV
     fecha = datetime.today().strftime("%Y%m%d")
     nombre_archivo = f"empresas_holanda_{fecha}.csv"
 
@@ -194,6 +235,10 @@ def capturar_empresas_holanda():
             writer.writeheader()
             writer.writerows(nuevas_empresas)
         print(f"✅ Exportadas {len(nuevas_empresas)} empresas nuevas → {nombre_archivo}")
+
+        # Subir CSV a GitHub
+        ruta_repo = f"exports/{nombre_archivo}"
+        subir_archivo_github(nombre_archivo, ruta_repo)
     else:
         print("ℹ️ No hay empresas nuevas para exportar hoy.")
 
@@ -207,7 +252,6 @@ def filtrar_empresas_nuevas(empresas, dias=7):
     for e in empresas:
         if e["fecha_inicio"]:
             try:
-                # updated_at viene en formato YYYY-MM-DD
                 fecha = datetime.strptime(str(e["fecha_inicio"]), "%Y-%m-%d")
                 if (hoy - fecha).days <= dias:
                     nuevas.append(e)
