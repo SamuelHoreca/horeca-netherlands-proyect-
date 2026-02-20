@@ -4,6 +4,7 @@ import os
 import base64
 from datetime import datetime
 import time
+from urllib.parse import quote
 
 # === CONFIGURACIÓN DE LA API DE OVERHEID.IO ===
 APIKEY = os.getenv("API_KEY")  # API key de overheid.io
@@ -126,6 +127,7 @@ def extraer_datos_empresa(item):
     """
     Extrae datos del item del listado y enriquece con perfil detallado.
     El sector/descripción se traduce del neerlandés al español.
+    Genera un enlace a Google Maps basado en la dirección y ciudad.
     """
     kvk = item.get("kvknummer", "")
     nombre = item.get("naam", "")
@@ -133,7 +135,14 @@ def extraer_datos_empresa(item):
     ciudad = bezoek.get("plaats", "")
     calle = bezoek.get("straat", "")
     numero = bezoek.get("huisnummer", "")
-    direccion = f"{calle} {numero}".strip()
+    direccion_base = f"{calle} {numero}".strip()
+
+    # Generar enlace Google Maps
+    maps_url = ""
+    if direccion_base and ciudad:
+        query_maps = f"{direccion_base}, {ciudad}, Netherlands"
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={quote(query_maps)}"
+
     sbi_list = item.get("sbi") or []
     sector = ", ".join(sbi_list)
     website = item.get("website", "")
@@ -162,7 +171,8 @@ def extraer_datos_empresa(item):
         "kvk_numero": kvk,
         "nombre": nombre,
         "ciudad": ciudad,
-        "direccion": direccion,
+        "direccion": direccion_base,
+        "google_maps": maps_url,  # Nueva columna
         "sector": sector_es,
         "website": website,
         "fecha_inicio": fecha_inicio,
@@ -183,7 +193,8 @@ def capturar_empresas_holanda():
         print(f"\u26a0\ufe0f MODO TEST: limitando a {MAX_EMPRESAS_TEST} empresas en total")
 
     kvk_vistos = cargar_kvk_vistos()
-    print(f"\n\U0001f4cb KVK numbers ya vistos en ejecuciones anteriores: {len(kvk_vistos)}")
+    print(f"
+\U0001f4cb KVK numbers ya vistos en ejecuciones anteriores: {len(kvk_vistos)}")
 
     nuevas_empresas = []
     nuevos_kvk = set()
@@ -194,7 +205,8 @@ def capturar_empresas_holanda():
             print(f"\u2705 L\u00edmite de prueba alcanzado ({MAX_EMPRESAS_TEST} empresas). Deteniendo b\u00fasqueda.")
             break
 
-        print(f"\n\U0001f50d Buscando empresas en {ciudad}...")
+        print(f"
+\U0001f50d Buscando empresas en {ciudad}...")
         page = 1
         size = 100
         encontradas_ciudad = 0
@@ -242,7 +254,8 @@ def capturar_empresas_holanda():
     # Actualizar el archivo de KVK vistos
     kvk_vistos.update(nuevos_kvk)
     guardar_kvk_vistos(kvk_vistos)
-    print(f"\n\U0001f4be Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
+    print(f"
+\U0001f4be Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
 
     if nuevas_empresas:
         # Exportar a CSV
@@ -251,7 +264,7 @@ def capturar_empresas_holanda():
 
         with open(nombre_archivo, "w", newline="", encoding="utf-8") as f:
             campos = [
-                "kvk_numero", "nombre", "ciudad", "direccion",
+                "kvk_numero", "nombre", "ciudad", "direccion", "google_maps",
                 "sector", "website", "fecha_inicio", "fecha_captura",
             ]
             writer = csv.DictWriter(f, fieldnames=campos)
@@ -280,7 +293,8 @@ def guardar_kvk_vistos(kvk_set):
     SEEN_FILE = "seen_kvk.txt"
     with open(SEEN_FILE, "w") as f:
         for kvk in kvk_set:
-            f.write(kvk + "\n")
+            f.write(kvk + "
+")
 
 
 if __name__ == "__main__":
