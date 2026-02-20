@@ -19,6 +19,30 @@ GITHUB_BRANCH = "main"
 MAX_EMPRESAS_TEST = 20
 
 
+def traducir_nl_es(texto):
+    """
+    Traduce un texto del neerlandés al español usando la API gratuita de MyMemory.
+    Devuelve el texto original si la traducción falla.
+    """
+    if not texto or not texto.strip():
+        return texto
+    try:
+        url = "https://api.mymemory.translated.net/get"
+        params = {
+            "q": texto[:500],  # MyMemory limita a 500 chars por petición
+            "langpair": "nl|es",
+        }
+        resp = requests.get(url, params=params, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            traduccion = data.get("responseData", {}).get("translatedText", "")
+            if traduccion and traduccion.upper() != texto.upper():
+                return traduccion
+    except Exception:
+        pass
+    return texto
+
+
 def subir_archivo_github(ruta_local, ruta_repo):
     """
     Sube o actualiza un archivo en GitHub via API REST.
@@ -69,6 +93,7 @@ def buscar_empresas(ciudad, page=1, size=100):
     url = (
         f"{BASE_URL}"
         f"?filters[bezoeklocatie.plaats]={ciudad}"
+        f"&fields[]=naam"
         f"&fields[]=bezoeklocatie.straat"
         f"&fields[]=bezoeklocatie.huisnummer"
         f"&fields[]=bezoeklocatie.postcode"
@@ -100,6 +125,7 @@ def obtener_perfil(slug):
 def extraer_datos_empresa(item):
     """
     Extrae datos del item del listado y enriquece con perfil detallado.
+    El sector/descripción se traduce del neerlandés al español.
     """
     kvk = item.get("kvknummer", "")
     nombre = item.get("naam", "")
@@ -126,12 +152,18 @@ def extraer_datos_empresa(item):
                 sbi_list = perfil.get("sbi") or []
                 sector = ", ".join(sbi_list)
 
+    # Texto base del sector (descripción tiene prioridad sobre código SBI)
+    sector_nl = descripcion if descripcion else sector
+
+    # Traducir al español
+    sector_es = traducir_nl_es(sector_nl) if sector_nl else ""
+
     return {
         "kvk_numero": kvk,
         "nombre": nombre,
         "ciudad": ciudad,
         "direccion": direccion,
-        "sector": descripcion or sector,
+        "sector": sector_es,
         "website": website,
         "fecha_inicio": fecha_inicio,
         "fecha_captura": datetime.today().strftime("%Y-%m-%d"),
@@ -169,7 +201,7 @@ def capturar_empresas_holanda():
         saltadas_ciudad = 0
 
         while True:
-            # Salir del bucle de p\u00e1ginas si ya alcanzamos el límite de test
+            # Salir del bucle de páginas si ya alcanzamos el límite de test
             if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
                 break
 
@@ -178,11 +210,11 @@ def capturar_empresas_holanda():
                 break
             items = datos.get("_embedded", {}).get("bedrijf", [])
             if not items:
-                print(f"  \u26a0\ufe0f Sin resultados en p\u00e1gina {page}")
+                print(f"  \u26a0\ufe0f Sin resultados en página {page}")
                 break
 
             page_count = datos.get("pageCount", 1)
-            print(f"  \U0001f4c4 P\u00e1gina {page}/{page_count} \u2014 {len(items)} empresas")
+            print(f"  \U0001f4c4 Página {page}/{page_count} — {len(items)} empresas")
 
             for empresa in items:
                 if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
@@ -199,7 +231,7 @@ def capturar_empresas_holanda():
                 nuevas_empresas.append(info)
                 nuevos_kvk.add(kvk)
                 encontradas_ciudad += 1
-                print(f"  \u2705 ({kvk}) \u2014 {info['ciudad']}")
+                print(f"  \u2705 {info['nombre']} ({kvk}) — {info['ciudad']}")
 
             if page >= page_count:
                 break
