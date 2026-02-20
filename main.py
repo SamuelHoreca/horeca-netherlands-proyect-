@@ -30,7 +30,7 @@ def traducir_nl_es(texto):
     try:
         url = "https://api.mymemory.translated.net/get"
         params = {
-            "q": texto[:500],  # MyMemory limita a 500 chars por petición
+            "q": texto[:500],
             "langpair": "nl|es",
         }
         resp = requests.get(url, params=params, timeout=5)
@@ -47,8 +47,6 @@ def traducir_nl_es(texto):
 def subir_archivo_github(ruta_local, ruta_repo):
     """
     Sube o actualiza un archivo en GitHub via API REST.
-    ruta_local: path del archivo en el contenedor
-    ruta_repo: path destino dentro del repositorio (ej: 'exports/empresas.csv')
     """
     if not GITHUB_TOKEN:
         print("\u26a0\ufe0f GITHUB_TOKEN no configurado, no se sube a GitHub")
@@ -63,13 +61,11 @@ def subir_archivo_github(ruta_local, ruta_repo):
         "Accept": "application/vnd.github+json",
     }
 
-    # Comprobar si el archivo ya existe para obtener su SHA (necesario para actualizar)
     resp = requests.get(url, headers=headers, params={"ref": GITHUB_BRANCH})
     sha = None
     if resp.status_code == 200:
         sha = resp.json().get("sha")
 
-    # Preparar payload
     fecha = datetime.today().strftime("%Y-%m-%d")
     payload = {
         "message": f"CSV empresas Holanda {fecha}",
@@ -77,7 +73,7 @@ def subir_archivo_github(ruta_local, ruta_repo):
         "branch": GITHUB_BRANCH,
     }
     if sha:
-        payload["sha"] = sha  # necesario para sobreescribir
+        payload["sha"] = sha
 
     resp = requests.put(url, headers=headers, json=payload)
     if resp.status_code in (200, 201):
@@ -125,9 +121,8 @@ def obtener_perfil(slug):
 
 def extraer_datos_empresa(item):
     """
-    Extrae datos del item del listado y enriquece con perfil detallado.
-    El sector/descripción se traduce del neerlandés al español.
-    Genera un enlace a Google Maps basado en la dirección y ciudad.
+    Extrae datos del item y genera enlace de Google Maps.
+    El sector se traduce del neerlandés al español.
     """
     kvk = item.get("kvknummer", "")
     nombre = item.get("naam", "")
@@ -161,10 +156,7 @@ def extraer_datos_empresa(item):
                 sbi_list = perfil.get("sbi") or []
                 sector = ", ".join(sbi_list)
 
-    # Texto base del sector (descripción tiene prioridad sobre código SBI)
     sector_nl = descripcion if descripcion else sector
-
-    # Traducir al español
     sector_es = traducir_nl_es(sector_nl) if sector_nl else ""
 
     return {
@@ -172,12 +164,27 @@ def extraer_datos_empresa(item):
         "nombre": nombre,
         "ciudad": ciudad,
         "direccion": direccion_base,
-        "google_maps": maps_url,  # Nueva columna
+        "google_maps": maps_url,
         "sector": sector_es,
         "website": website,
         "fecha_inicio": fecha_inicio,
         "fecha_captura": datetime.today().strftime("%Y-%m-%d"),
     }
+
+
+def cargar_kvk_vistos():
+    SEEN_FILE = "seen_kvk.txt"
+    if not os.path.exists(SEEN_FILE):
+        return set()
+    with open(SEEN_FILE, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def guardar_kvk_vistos(kvk_set):
+    SEEN_FILE = "seen_kvk.txt"
+    with open(SEEN_FILE, "w") as f:
+        for kvk in kvk_set:
+            f.write(kvk + "\n")
 
 
 def capturar_empresas_holanda():
@@ -193,27 +200,23 @@ def capturar_empresas_holanda():
         print(f"\u26a0\ufe0f MODO TEST: limitando a {MAX_EMPRESAS_TEST} empresas en total")
 
     kvk_vistos = cargar_kvk_vistos()
-    print(f"
-\U0001f4cb KVK numbers ya vistos en ejecuciones anteriores: {len(kvk_vistos)}")
+    print(f"\n\U0001f4cb KVK numbers ya vistos: {len(kvk_vistos)}")
 
     nuevas_empresas = []
     nuevos_kvk = set()
 
     for ciudad in ciudades:
-        # Salir del bucle de ciudades si ya alcanzamos el límite de test
         if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
-            print(f"\u2705 L\u00edmite de prueba alcanzado ({MAX_EMPRESAS_TEST} empresas). Deteniendo b\u00fasqueda.")
+            print(f"\u2705 L\u00edmite de prueba alcanzado ({MAX_EMPRESAS_TEST} empresas). Deteniendo.")
             break
 
-        print(f"
-\U0001f50d Buscando empresas en {ciudad}...")
+        print(f"\n\U0001f50d Buscando empresas en {ciudad}...")
         page = 1
         size = 100
         encontradas_ciudad = 0
         saltadas_ciudad = 0
 
         while True:
-            # Salir del bucle de páginas si ya alcanzamos el límite de test
             if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
                 break
 
@@ -222,11 +225,11 @@ def capturar_empresas_holanda():
                 break
             items = datos.get("_embedded", {}).get("bedrijf", [])
             if not items:
-                print(f"  \u26a0\ufe0f Sin resultados en página {page}")
+                print(f"  \u26a0\ufe0f Sin resultados en p\u00e1gina {page}")
                 break
 
             page_count = datos.get("pageCount", 1)
-            print(f"  \U0001f4c4 Página {page}/{page_count} — {len(items)} empresas")
+            print(f"  \U0001f4c4 P\u00e1gina {page}/{page_count} \u2014 {len(items)} empresas")
 
             for empresa in items:
                 if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
@@ -243,7 +246,7 @@ def capturar_empresas_holanda():
                 nuevas_empresas.append(info)
                 nuevos_kvk.add(kvk)
                 encontradas_ciudad += 1
-                print(f"  \u2705 {info['nombre']} ({kvk}) — {info['ciudad']}")
+                print(f"  \u2705 {info['nombre']} ({kvk}) \u2014 {info['ciudad']}")
 
             if page >= page_count:
                 break
@@ -251,14 +254,11 @@ def capturar_empresas_holanda():
 
         print(f"  \U0001f4ca {ciudad}: {encontradas_ciudad} nuevas, {saltadas_ciudad} ya vistas")
 
-    # Actualizar el archivo de KVK vistos
     kvk_vistos.update(nuevos_kvk)
     guardar_kvk_vistos(kvk_vistos)
-    print(f"
-\U0001f4be Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
+    print(f"\n\U0001f4be Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
 
     if nuevas_empresas:
-        # Exportar a CSV
         fecha = datetime.today().strftime("%Y%m%d")
         nombre_archivo = f"empresas_holanda_{fecha}.csv"
 
@@ -272,29 +272,12 @@ def capturar_empresas_holanda():
             writer.writerows(nuevas_empresas)
         print(f"\u2705 Exportadas {len(nuevas_empresas)} empresas \u2192 {nombre_archivo}")
 
-        # Subir CSV a GitHub
         ruta_repo = f"exports/{nombre_archivo}"
         subir_archivo_github(nombre_archivo, ruta_repo)
     else:
         print("\u2139\ufe0f No hay empresas nuevas para exportar hoy.")
 
     return nombre_archivo
-
-
-def cargar_kvk_vistos():
-    SEEN_FILE = "seen_kvk.txt"
-    if not os.path.exists(SEEN_FILE):
-        return set()
-    with open(SEEN_FILE, "r") as f:
-        return set(line.strip() for line in f if line.strip())
-
-
-def guardar_kvk_vistos(kvk_set):
-    SEEN_FILE = "seen_kvk.txt"
-    with open(SEEN_FILE, "w") as f:
-        for kvk in kvk_set:
-            f.write(kvk + "
-")
 
 
 if __name__ == "__main__":
