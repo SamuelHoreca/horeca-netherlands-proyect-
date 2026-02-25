@@ -188,7 +188,7 @@ def guardar_kvk_vistos(kvk_set):
 
 
 def capturar_empresas_holanda():
-    """Captura todas las empresas de las principales ciudades de Holanda."""
+    """Captura TODAS las empresas de las principales ciudades de Holanda."""
     ciudades = [
         "Amsterdam", "Rotterdam", "Den Haag", "Utrecht", "Eindhoven",
         "Groningen", "Tilburg", "Almere", "Breda", "Nijmegen",
@@ -196,67 +196,73 @@ def capturar_empresas_holanda():
         "Apeldoorn", "'s-Hertogenbosch", "Hoofddorp", "Maastricht", "Leiden",
     ]
 
-    if MAX_EMPRESAS_TEST > 0:
-        print(f"\u26a0\ufe0f MODO TEST: limitando a {MAX_EMPRESAS_TEST} empresas en total")
-
     kvk_vistos = cargar_kvk_vistos()
-    print(f"\n\U0001f4cb KVK numbers ya vistos: {len(kvk_vistos)}")
+    print(f"\n📋 KVK numbers ya vistos: {len(kvk_vistos)}")
 
     nuevas_empresas = []
     nuevos_kvk = set()
+    nombres_vistos = set()  # 🆕 Capa secundaria: (nombre_lower, ciudad_lower)
 
     for ciudad in ciudades:
-        if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
-            print(f"\u2705 L\u00edmite de prueba alcanzado ({MAX_EMPRESAS_TEST} empresas). Deteniendo.")
-            break
-
-        print(f"\n\U0001f50d Buscando empresas en {ciudad}...")
+        print(f"\n🔍 Buscando empresas en {ciudad}...")
         page = 1
         size = 100
         encontradas_ciudad = 0
         saltadas_ciudad = 0
 
         while True:
-            if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
-                break
-
             datos = buscar_empresas(ciudad=ciudad, page=page, size=size)
             if not datos:
                 break
             items = datos.get("_embedded", {}).get("bedrijf", [])
             if not items:
-                print(f"  \u26a0\ufe0f Sin resultados en p\u00e1gina {page}")
+                print(f"  ⚠️ Sin resultados en página {page}")
                 break
 
             page_count = datos.get("pageCount", 1)
-            print(f"  \U0001f4c4 P\u00e1gina {page}/{page_count} \u2014 {len(items)} empresas")
+            print(f"  📄 Página {page}/{page_count} — {len(items)} empresas")
 
             for empresa in items:
-                if MAX_EMPRESAS_TEST > 0 and len(nuevas_empresas) >= MAX_EMPRESAS_TEST:
-                    break
-
                 kvk = str(empresa.get("kvknummer", "")).strip()
 
+                # 🆕 Saltar si no tiene KVK (no se puede deduplicar de forma fiable)
+                if not kvk:
+                    saltadas_ciudad += 1
+                    continue
+
+                # Deduplicación primaria: por KVK
                 if kvk in kvk_vistos or kvk in nuevos_kvk:
+                    saltadas_ciudad += 1
+                    continue
+
+                # 🆕 Deduplicación secundaria: por nombre + ciudad
+                bezoek = empresa.get("bezoeklocatie") or {}
+                nombre_raw = str(empresa.get("naam", "")).strip().lower()
+                ciudad_raw = str(bezoek.get("plaats", "")).strip().lower()
+                clave_nombre = (nombre_raw, ciudad_raw)
+
+                if clave_nombre in nombres_vistos:
                     saltadas_ciudad += 1
                     continue
 
                 time.sleep(0.2)
                 info = extraer_datos_empresa(empresa)
+
                 nuevas_empresas.append(info)
                 nuevos_kvk.add(kvk)
+                nombres_vistos.add(clave_nombre)  # 🆕
                 encontradas_ciudad += 1
-                print(f"  \u2705 {info['nombre']} ({kvk}) \u2014 {info['ciudad']}")
+                print(f"  ✅ {info['nombre']} ({kvk}) — {info['ciudad']}")
 
             if page >= page_count:
                 break
             page += 1
 
-        print(f"  \U0001f4ca {ciudad}: {encontradas_ciudad} nuevas, {saltadas_ciudad} ya vistas")
+        print(f"  📊 {ciudad}: {encontradas_ciudad} nuevas, {saltadas_ciudad} ya vistas/duplicadas")
 
     kvk_vistos.update(nuevos_kvk)
     guardar_kvk_vistos(kvk_vistos)
-    print(f"\n\U0001f4be Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
+    print(f"\n💾 Registro actualizado: {len(kvk_vistos)} KVK numbers en total")
 
     if nuevas_empresas:
         fecha = datetime.today().strftime("%Y%m%d")
@@ -270,12 +276,12 @@ def capturar_empresas_holanda():
             writer = csv.DictWriter(f, fieldnames=campos)
             writer.writeheader()
             writer.writerows(nuevas_empresas)
-        print(f"\u2705 Exportadas {len(nuevas_empresas)} empresas \u2192 {nombre_archivo}")
+        print(f"✅ Exportadas {len(nuevas_empresas)} empresas → {nombre_archivo}")
 
         ruta_repo = f"exports/{nombre_archivo}"
         subir_archivo_github(nombre_archivo, ruta_repo)
     else:
-        print("\u2139\ufe0f No hay empresas nuevas para exportar hoy.")
+        print("ℹ️ No hay empresas nuevas para exportar hoy.")
 
     return nombre_archivo
 
